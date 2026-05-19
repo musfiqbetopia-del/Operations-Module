@@ -1,0 +1,826 @@
+// ============================================================
+//  OPERATIONS MODULE — Complete Setup with Explanations
+//  Odoo 19 | WSL | betopia_live database
+// ============================================================
+
+WHY THIS MODULE?
+─────────────────
+• Sales Order = What you're selling to the customer
+• Operations = WHO will DO the work and HOW they'll do it
+• Employee = The operation man who actually does the work
+
+Example:
+  Sales Order: "Sell 10 Motherboards to Company X"
+  Operation 1: "Assembly - Assigned to Rashedul Islam (employee)"
+  Operation 2: "Testing - Assigned to Fahimur Islam (employee)"
+  Operation 3: "Packaging - Assigned to Md Musfikus Salehin (employee)"
+
+Connection Flow:
+  Sales Order → has many Operations → each assigned to 1 Employee
+
+
+// ============================================================
+//  STEP 1: Create the folder structure
+// ============================================================
+
+WHY?
+────
+Odoo modules need a specific folder structure. This tells Odoo where
+to find the code, views, and configurations.
+
+Structure:
+  operations/          ← Module name
+  ├── __init__.py     ← Makes Python treat folder as package
+  ├── __manifest__.py ← Module metadata (name, version, dependencies)
+  ├── models/         ← Database models (the tables & logic)
+  │   ├── __init__.py
+  │   ├── operations.py    ← Main Operations model
+  │   └── sales_order.py   ← Extend Sales Order model
+  └── views/          ← XML files (UI forms & buttons)
+      ├── operations_views.xml
+      └── sales_order_views.xml
+
+RUN IN WSL:
+───────────
+sudo mkdir -p /odoo/custom/addons/operations/models
+sudo mkdir -p /odoo/custom/addons/operations/views
+sudo chown -R odoo19:odoo19 /odoo/custom/addons/operations
+
+
+// ============================================================
+//  STEP 2: Create __manifest__.py
+// ============================================================
+
+WHY?
+────
+This file tells Odoo:
+  • What's the module name? "Operations Management"
+  • What version? "19.0.1.0.0"
+  • What other modules does it need? ('sale', 'hr')
+    - 'sale' = We need the Sales module to exist
+    - 'hr' = We need the HR module for employees
+  • Which files to load? data = ['views/...']
+
+WHAT TO DO:
+───────────
+sudo nano /odoo/custom/addons/operations/__manifest__.py
+
+PASTE:
+──────
+{
+    'name': 'Operations Management',
+    'version': '19.0.1.0.0',
+    'category': 'Sales',
+    'summary': 'Manage operations for sales orders - assign to employees',
+    'author': 'Betopia',
+    'depends': ['sale', 'hr'],  # Requires Sale & HR modules
+    'data': [
+        'views/operations_views.xml',      # Views for operations
+        'views/sales_order_views.xml',     # Add button to sales order
+    ],
+    'installable': True,
+    'auto_install': False,
+}
+
+SAVE: Ctrl+O → Enter → Ctrl+X
+
+
+// ============================================================
+//  STEP 3: Create models/__init__.py
+// ============================================================
+
+WHY?
+────
+Python needs to know which model files to import.
+This file imports all our custom models so Odoo can load them.
+
+WHAT TO DO:
+───────────
+sudo nano /odoo/custom/addons/operations/models/__init__.py
+
+PASTE:
+──────
+from . import operations      # Import our Operations model
+from . import sales_order     # Import Sales Order extension
+
+SAVE: Ctrl+O → Enter → Ctrl+X
+
+
+// ============================================================
+//  STEP 4: Create models/operations.py
+// ============================================================
+
+WHY?
+────
+This is the CORE of the module.
+It defines:
+  • What is an "Operation"? (table structure)
+  • What fields does it have? (name, employee, date, status, etc.)
+  • What actions can we do? (assign, start, complete, cancel)
+
+Key Fields Explained:
+  ─────────────────────
+
+  1. name = fields.Char()
+     WHY? Unique identifier like "OP00001", "OP00002"
+     Auto-generated using sequence (like invoice numbers)
+
+  2. sale_order_id = fields.Many2one('sale.order')
+     WHY? Links this operation to a sales order
+     Example: Operation "OP00001" is for Sales Order "SO0001"
+
+  3. employee_id = fields.Many2one('hr.employee')
+     WHY? Links to the operation man who will do the work
+     Example: "Rashedul Islam" is assigned to "OP00001"
+
+  4. operation_type = fields.Selection([...])
+     WHY? Categorize what kind of work: Assembly, Testing, Packaging, etc.
+
+  5. state = fields.Selection([...])
+     WHY? Track the operation progress:
+       draft → assigned → in_progress → completed
+     Example: "Status: Completed" means work is done
+
+WHAT TO DO:
+───────────
+sudo nano /odoo/custom/addons/operations/models/operations.py
+
+PASTE:
+──────
+from odoo import models, fields, api
+from datetime import datetime
+
+
+class Operations(models.Model):
+    _name = 'operations.operation'          # Table name in database
+    _description = 'Operations Execution'   # Human-readable name
+    _order = 'create_date desc'             # Show newest first
+
+    # ═══════════════════════════════════════════════════════════
+    # BASIC INFORMATION
+    # ═══════════════════════════════════════════════════════════
+
+    name = fields.Char(
+        string='Operation Number',      # Label in form
+        required=True,                  # Must be filled
+        copy=False,                     # Don't copy when duplicating
+        default='NEW',
+        readonly=True,                  # Auto-generated, user can't edit
+    )
+
+    sale_order_id = fields.Many2one(
+        'sale.order',                   # Links to sale.order model
+        string='Sales Order',
+        required=True,
+        help='The sales order this operation is for',
+    )
+
+    operation_date = fields.Date(
+        string='Operation Date',
+        required=True,
+        default=fields.Date.today,      # Default to today's date
+    )
+
+    # ═══════════════════════════════════════════════════════════
+    # OPERATION DETAILS
+    # ═══════════════════════════════════════════════════════════
+
+    description = fields.Text(
+        string='Operation Description',
+        help='What exactly needs to be done?',
+    )
+
+    operation_type = fields.Selection(
+        [
+            ('assembly', 'Assembly'),
+            ('testing', 'Testing'),
+            ('packaging', 'Packaging'),
+            ('quality_check', 'Quality Check'),
+            ('delivery_prep', 'Delivery Preparation'),
+            ('other', 'Other'),
+        ],
+        string='Operation Type',
+        required=True,
+    )
+
+    # ═══════════════════════════════════════════════════════════
+    # OPERATION MAN ASSIGNMENT
+    # WHY? Link to the employee who will do this operation
+    # ═══════════════════════════════════════════════════════════
+
+    employee_id = fields.Many2one(
+        'hr.employee',                  # Links to hr.employee model
+        string='Operation Man',
+        required=True,
+        help='The employee responsible for this operation',
+    )
+
+    # These are "related" fields = automatically pull data from employee
+    # WHY? So we don't need to ask for phone again - it's already in Employee!
+    employee_phone = fields.Char(
+        related='employee_id.mobile_phone',
+        string='Employee Phone',
+        readonly=True,                  # Auto-filled, can't edit here
+    )
+
+    employee_email = fields.Char(
+        related='employee_id.work_email',
+        string='Employee Email',
+        readonly=True,
+    )
+
+    # ═══════════════════════════════════════════════════════════
+    # STATUS TRACKING
+    # WHY? Track workflow: draft → assigned → in_progress → completed
+    # ═══════════════════════════════════════════════════════════
+
+    state = fields.Selection(
+        [
+            ('draft', 'Draft'),                    # Just created
+            ('assigned', 'Assigned to Employee'),  # Employee knows about it
+            ('in_progress', 'In Progress'),        # Employee started work
+            ('completed', 'Completed'),            # Work is done
+            ('cancelled', 'Cancelled'),            # Operation cancelled
+        ],
+        string='Status',
+        default='draft',
+        tracking=True,                  # Track changes in chatter
+    )
+
+    # ═══════════════════════════════════════════════════════════
+    # TIMING
+    # WHY? Track when work starts and ends for reporting
+    # ═══════════════════════════════════════════════════════════
+
+    start_date = fields.Datetime(
+        string='Start Date',
+        help='When the employee actually starts working',
+    )
+
+    completion_date = fields.Datetime(
+        string='Completion Date',
+        help='When the employee finishes',
+    )
+
+    # ═══════════════════════════════════════════════════════════
+    # WORK LOG & DOCUMENTATION
+    # WHY? Employee can note what they did, problems encountered, etc.
+    # ═══════════════════════════════════════════════════════════
+
+    work_notes = fields.Text(
+        string='Work Notes',
+        help='Employee notes about the work performed',
+    )
+
+    # ═══════════════════════════════════════════════════════════
+    # REFERENCE FIELDS (for convenience)
+    # WHY? Quick access to customer without navigating to sales order
+    # ═══════════════════════════════════════════════════════════
+
+    customer_id = fields.Many2one(
+        related='sale_order_id.partner_id',
+        string='Customer',
+        readonly=True,                  # Auto-filled from sales order
+    )
+
+    # ═══════════════════════════════════════════════════════════
+    # METHODS (Actions)
+    # WHY? Define what happens when buttons are clicked
+    # ═══════════════════════════════════════════════════════════
+
+    @api.model
+    def create(self, vals):
+        """Auto-generate operation number when creating"""
+        if vals.get('name', 'NEW') == 'NEW':
+            # Get next number from sequence (like OP00001, OP00002, etc.)
+            vals['name'] = self.env['ir.sequence'].next_by_code('operations.operation') or 'OP00001'
+        return super(Operations, self).create(vals)
+
+    def action_assign(self):
+        """Button action: Mark as assigned to employee"""
+        self.write({'state': 'assigned'})
+
+    def action_start(self):
+        """Button action: Start the operation"""
+        self.write({
+            'state': 'in_progress',
+            'start_date': datetime.now(),  # Record when work started
+        })
+
+    def action_complete(self):
+        """Button action: Mark operation as completed"""
+        self.write({
+            'state': 'completed',
+            'completion_date': datetime.now(),  # Record when work ended
+        })
+
+    def action_cancel(self):
+        """Button action: Cancel the operation"""
+        self.write({'state': 'cancelled'})
+
+
+SAVE: Ctrl+O → Enter → Ctrl+X
+
+
+// ============================================================
+//  STEP 5: Create models/sales_order.py
+// ============================================================
+
+WHY?
+────
+This file EXTENDS the existing Sale Order model.
+WHY EXTEND instead of creating new?
+  • Sales Order already exists in Odoo
+  • We don't want to replace it
+  • We just want to ADD a new relationship to Operations
+
+What we're adding:
+  • operation_ids = Link to all operations for this sales order
+  • operations_count = Show how many operations exist
+  • action_create_operation() = Button to create new operation
+  • action_view_operations() = Button to view all operations
+
+WHAT TO DO:
+───────────
+sudo nano /odoo/custom/addons/operations/models/sales_order.py
+
+PASTE:
+──────
+from odoo import models, fields, api
+
+
+class SaleOrder(models.Model):
+    _inherit = 'sale.order'        # Extend existing sale.order model
+
+    # WHY? Show all operations linked to this sales order
+    operation_ids = fields.One2many(
+        'operations.operation',       # The other model
+        'sale_order_id',              # The field linking back to us
+        string='Operations',
+        help='Operations to be performed for this sales order',
+    )
+
+    # WHY? Quick count for dashboard (shows "2 operations")
+    operations_count = fields.Integer(
+        string='Operations Count',
+        compute='_compute_operations_count',  # Calculated automatically
+    )
+
+    @api.depends('operation_ids')
+    def _compute_operations_count(self):
+        """Count how many operations for this sales order"""
+        for order in self:
+            order.operations_count = len(order.operation_ids)
+
+    def action_create_operation(self):
+        """WHY? Clicking 'Create Operation' button opens new operation form
+           The form pre-fills this sales order automatically"""
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'operations.operation',
+            'view_mode': 'form',
+            'context': {'default_sale_order_id': self.id},  # Pre-fill sales order
+            'target': 'new',  # Open in popup dialog
+        }
+
+    def action_view_operations(self):
+        """WHY? Show all operations for this sales order in a list"""
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'operations.operation',
+            'view_mode': 'tree,form',  # Show as list and detailed form
+            'domain': [('sale_order_id', '=', self.id)],  # Filter by this SO
+            'target': 'current',  # Replace current view
+        }
+
+
+SAVE: Ctrl+O → Enter → Ctrl+X
+
+
+// ============================================================
+//  STEP 6: Create root __init__.py
+// ============================================================
+
+WHY?
+────
+Makes the operations folder a Python package that Odoo can import.
+
+WHAT TO DO:
+───────────
+sudo nano /odoo/custom/addons/operations/__init__.py
+
+PASTE:
+──────
+from . import models  # Import everything from models folder
+
+SAVE: Ctrl+O → Enter → Ctrl+X
+
+
+// ============================================================
+//  STEP 7: Create views/operations_views.xml
+// ============================================================
+
+WHY?
+────
+XML defines the UI (User Interface):
+  • What fields appear in the form?
+  • What buttons are visible?
+  • How is the data laid out?
+
+This file creates:
+  • Form View: Detail view for one operation
+  • Tree View: List view of all operations
+  • Search View: Filter & search operations
+
+WHAT TO DO:
+───────────
+sudo nano /odoo/custom/addons/operations/views/operations_views.xml
+
+PASTE:
+──────
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- ═════════════════════════════════════════════════════ -->
+        <!-- FORM VIEW: What you see when you open an operation -->
+        <!-- ═════════════════════════════════════════════════════ -->
+        <record id="operations_operation_view_form" model="ir.ui.view">
+            <field name="name">operations.operation.form</field>
+            <field name="model">operations.operation</field>
+            <field name="arch" type="xml">
+                <form string="Operation">
+                    
+                    <!-- Status bar at top showing draft → assigned → in progress → done -->
+                    <header>
+                        <button 
+                            name="action_assign" 
+                            type="object" 
+                            string="✓ Assign" 
+                            class="btn-primary"
+                            attrs="{'invisible': [('state', '!=', 'draft')]}"
+                        />
+                        <button 
+                            name="action_start" 
+                            type="object" 
+                            string="▶ Start Work" 
+                            class="btn-primary"
+                            attrs="{'invisible': [('state', '!=', 'assigned')]}"
+                        />
+                        <button 
+                            name="action_complete" 
+                            type="object" 
+                            string="✓ Complete" 
+                            class="btn-success"
+                            attrs="{'invisible': [('state', '!=', 'in_progress')]}"
+                        />
+                        <button 
+                            name="action_cancel" 
+                            type="object" 
+                            string="✗ Cancel" 
+                            class="btn-secondary"
+                        />
+                        <field name="state" widget="statusbar" />
+                    </header>
+
+                    <!-- Main content -->
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" readonly="1"/>
+                            </h1>
+                        </div>
+
+                        <!-- First group: Basic info -->
+                        <group>
+                            <group>
+                                <!-- WHY sale_order_id? Links to what we're selling -->
+                                <field name="sale_order_id" required="1" />
+                                
+                                <!-- WHY customer_id? Show who we're serving -->
+                                <field name="customer_id" />
+                                
+                                <!-- WHY operation_date? When is the work scheduled? -->
+                                <field name="operation_date" />
+                                
+                                <!-- WHY operation_type? What kind of work? -->
+                                <field name="operation_type" required="1" />
+                            </group>
+                            
+                            <group>
+                                <!-- WHY employee_id? WHO does the work? CORE FIELD! -->
+                                <field name="employee_id" required="1" />
+                                
+                                <!-- WHY these readonly? Convenience fields pulled from employee -->
+                                <field name="employee_phone" readonly="1" />
+                                <field name="employee_email" readonly="1" />
+                            </group>
+                        </group>
+
+                        <!-- Description: What exactly needs to be done? -->
+                        <field name="description" />
+
+                        <!-- Second group: Timing -->
+                        <group string="Timing">
+                            <group>
+                                <field name="start_date" />
+                            </group>
+                            <group>
+                                <field name="completion_date" />
+                            </group>
+                        </group>
+
+                        <!-- Work notes: Employee updates on progress -->
+                        <field name="work_notes" />
+                    </sheet>
+
+                    <!-- Message/activity feed (like chatter in sales orders) -->
+                    <div class="oe_chatter">
+                        <field name="message_ids" widget="mail_thread" />
+                    </div>
+                </form>
+            </field>
+        </record>
+
+        <!-- ═════════════════════════════════════════════════════ -->
+        <!-- TREE VIEW: List of all operations -->
+        <!-- ═════════════════════════════════════════════════════ -->
+        <record id="operations_operation_view_tree" model="ir.ui.view">
+            <field name="name">operations.operation.tree</field>
+            <field name="model">operations.operation</field>
+            <field name="arch" type="xml">
+                <tree string="Operations">
+                    <field name="name" />
+                    <field name="sale_order_id" />
+                    <field name="customer_id" />
+                    <field name="employee_id" />
+                    <field name="operation_type" />
+                    <field name="operation_date" />
+                    <field name="state" />
+                </tree>
+            </field>
+        </record>
+
+        <!-- ═════════════════════════════════════════════════════ -->
+        <!-- SEARCH VIEW: Filter & find operations -->
+        <!-- ═════════════════════════════════════════════════════ -->
+        <record id="operations_operation_view_search" model="ir.ui.view">
+            <field name="name">operations.operation.search</field>
+            <field name="model">operations.operation</field>
+            <field name="arch" type="xml">
+                <search string="Search Operations">
+                    <field name="name" />
+                    <field name="sale_order_id" />
+                    <field name="employee_id" />
+                    <separator />
+                    <filter name="draft" string="Draft" domain="[('state','=','draft')]" />
+                    <filter name="in_progress" string="In Progress" domain="[('state','=','in_progress')]" />
+                    <filter name="completed" string="Completed" domain="[('state','=','completed')]" />
+                    <separator />
+                    <group expand="0" string="Group By">
+                        <filter string="Employee" name="employee" domain="[]" context="{'group_by':'employee_id'}" />
+                        <filter string="Status" name="status" domain="[]" context="{'group_by':'state'}" />
+                        <filter string="Operation Type" name="type" domain="[]" context="{'group_by':'operation_type'}" />
+                    </group>
+                </search>
+            </field>
+        </record>
+
+        <!-- ═════════════════════════════════════════════════════ -->
+        <!-- ACTION: Menu item & default view -->
+        <!-- ═════════════════════════════════════════════════════ -->
+        <record id="operations_operation_action" model="ir.actions.act_window">
+            <field name="name">Operations</field>
+            <field name="res_model">operations.operation</field>
+            <field name="view_mode">tree,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    Create a new operation to assign work to employees!
+                </p>
+            </field>
+        </record>
+
+        <!-- ═════════════════════════════════════════════════════ -->
+        <!-- MENU: Add "Operations" to left sidebar -->
+        <!-- ═════════════════════════════════════════════════════ -->
+        <menuitem 
+            id="operations_menu_root" 
+            name="Operations" 
+            sequence="40"
+        />
+        <menuitem 
+            id="operations_menu_main" 
+            parent="operations_menu_root"
+            name="Operations" 
+            action="operations_operation_action"
+            sequence="1"
+        />
+
+    </data>
+</odoo>
+
+SAVE: Ctrl+O → Enter → Ctrl+X
+
+
+// ============================================================
+//  STEP 8: Create views/sales_order_views.xml
+// ============================================================
+
+WHY?
+────
+This adds:
+  • "Create Operation" button in sales order
+  • "Operations" tab showing all operations for that sales order
+  • Operations count badge
+
+WHAT TO DO:
+───────────
+sudo nano /odoo/custom/addons/operations/views/sales_order_views.xml
+
+PASTE:
+──────
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- ═════════════════════════════════════════════════════ -->
+        <!-- INHERIT SALES ORDER FORM -->
+        <!-- WHY? We're modifying the existing Sales Order form -->
+        <!-- ═════════════════════════════════════════════════════ -->
+        <record id="sale_order_view_form_inherit_operations" model="ir.ui.view">
+            <field name="name">sale.order.form.inherit.operations</field>
+            <field name="model">sale.order</field>
+            <field name="inherit_id" ref="sale.view_order_form" />
+            <field name="arch" type="xml">
+
+                <!-- Add buttons next to other action buttons -->
+                <xpath expr="//header/button[@name='action_quotation_send']" position="after">
+                    <button 
+                        name="action_create_operation" 
+                        type="object" 
+                        string="➕ Create Operation"
+                        class="btn-primary"
+                        help="Create a new operation for this sales order"
+                    />
+                    <button 
+                        name="action_view_operations" 
+                        type="object" 
+                        string="📋 View Operations"
+                        help="View all operations for this sales order"
+                    />
+                </xpath>
+
+                <!-- Add Operations section in the form -->
+                <xpath expr="//notebook" position="inside">
+                    <page string="Operations" name="operations">
+                        <!-- Show number of operations -->
+                        <div class="alert alert-info" role="alert">
+                            <h4>
+                                <field name="operations_count" widget="integer" />
+                                Operations
+                            </h4>
+                        </div>
+                        
+                        <!-- List all operations -->
+                        <field name="operation_ids" readonly="1">
+                            <tree editable="bottom">
+                                <field name="name" />
+                                <field name="employee_id" />
+                                <field name="operation_type" />
+                                <field name="operation_date" />
+                                <field name="state" />
+                            </tree>
+                        </field>
+                    </page>
+                </xpath>
+
+            </field>
+        </record>
+
+    </data>
+</odoo>
+
+SAVE: Ctrl+O → Enter → Ctrl+X
+
+
+// ============================================================
+//  STEP 9: Set permissions
+// ============================================================
+
+WHY?
+────
+The odoo19 user needs to own the files so they can be read by Odoo.
+
+WHAT TO DO:
+───────────
+sudo chown -R odoo19:odoo19 /odoo/custom/addons/operations
+sudo chmod -R 755 /odoo/custom/addons/operations
+
+
+// ============================================================
+//  STEP 10: Restart Odoo
+// ============================================================
+
+WHY?
+────
+Odoo needs to reload Python files and register the new module.
+
+WHAT TO DO:
+───────────
+sudo systemctl restart odoo19
+
+Wait 10 seconds, then check:
+sudo journalctl -u odoo19 -n 50 --no-pager
+
+Look for: "operations" — if you see it, the module loaded!
+
+
+// ============================================================
+//  STEP 11: Install the module in Odoo UI
+// ============================================================
+
+WHY?
+────
+Odoo needs to know this module is active and create database tables.
+
+WHAT TO DO:
+───────────
+1. Open http://localhost:8069
+2. Go to Apps menu → Update Apps List (⟳ icon)
+3. Search: "Operations"
+4. Click "Operations Management"
+5. Click INSTALL button
+6. Wait for ✅ (green checkmark)
+
+
+// ============================================================
+//  STEP 12: TEST IT!
+// ============================================================
+
+HOW IT WORKS:
+─────────────
+
+Scenario: "Sell 10 Motherboards, need Assembly and Testing"
+
+1. Create Sales Order:
+   - Go to Sales → Orders
+   - Create sales order for "10 Motherboards"
+   - Confirm order
+
+2. Create Operations:
+   - In the sales order, click "➕ Create Operation"
+   - Fill:
+     * Operation Type: "Assembly"
+     * Employee: "Rashedul Islam"
+     * Description: "Assemble 10 boards"
+     * Date: Today
+   - Save & Close
+
+3. Repeat for 2nd operation:
+   - Click "➕ Create Operation" again
+   - Operation Type: "Testing"
+   - Employee: "Fahimur Islam"
+   - Description: "Test all 10 boards"
+   - Save
+
+4. View Operations:
+   - Click "📋 View Operations"
+   - See both operations listed
+   - Click each to edit
+
+5. Track Progress:
+   - Employee "Rashedul" opens operation
+   - Clicks "✓ Assign" → state changes to "Assigned"
+   - Clicks "▶ Start Work" → state changes to "In Progress"
+   - When done, clicks "✓ Complete" → state changes to "Completed"
+   - Updates "Work Notes" field with what was done
+
+6. Dashboard:
+   - Go to Operations menu → See all operations
+   - Filter by "In Progress" to see what's being worked on
+   - Filter by Employee to see their workload
+
+
+// ============================================================
+//  KEY CONCEPTS YOU NOW UNDERSTAND
+// ============================================================
+
+✅ Many2one vs One2many:
+   - many2one: Operation.employee_id → One employee
+   - One2many: SaleOrder.operation_ids → Many operations
+
+✅ Related fields:
+   - Operation.employee_phone → Automatically pulls from employee
+   - No duplication, always fresh data
+
+✅ State machine:
+   - draft → assigned → in_progress → completed
+   - Buttons only show when state is right
+
+✅ Inheritance:
+   - We didn't replace Sale Order
+   - We just added new fields & buttons to it
+
+✅ Connections:
+   Sales Order ← → Operations ← → Employees
+   Everything linked!
